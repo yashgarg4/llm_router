@@ -85,9 +85,22 @@ class RouterConfig(BaseModel):
     models_config: Path = Path("config/models.yaml")
     policy_config: Path = Path("config/policy.yaml")
 
+    # Phase 2: embedding complexity classifier (the default second stage).
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Softmax temperature turning centroid similarities into a 0..1 score.
+    # Lower = sharper (score snaps toward the nearest tier); higher = smoother.
+    embedding_temperature: float = Field(default=0.10, gt=0)
+    # An embedding decision is "ambiguous" when the gap between the top two
+    # tier-centroid similarities is below this margin. Only then (and only if
+    # enabled) does the optional LLM classifier run.
+    ambiguity_margin: float = Field(default=0.05, ge=0)
+
     # Phase 2: opt-in LLM classifier. Default OFF — the default path is
     # rules -> embeddings only, never an LLM.
     use_llm_classifier: bool = False
+    # Which registered model the LLM classifier calls (a cheap one — the
+    # classifier must never be more expensive than the routing it informs).
+    llm_classifier_model: str = "gemini-3.1-flash-lite"
 
     # Phase 3: escalation is always capped so a systemic cheap-tier failure
     # cannot route 100% of traffic to the most expensive model.

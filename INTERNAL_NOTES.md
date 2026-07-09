@@ -225,3 +225,104 @@ table and the "router latency is a misframing" point (a regex scan is free).
   cheapest model whose context window fits.
 - *Q: Where do prices live and why does it matter?* A: In `models.yaml`, not
   in code. A rate change should be a config edit, not a deploy.
+
+---
+
+### Phase 2 — Complexity classifier ✅
+
+**What was built**
+- `classifier/embedding.py` — `EmbeddingClassifier`: embeds per-tier exemplars
+  once at startup (local bge-small), builds a centroid per tier, and scores a
+  query by projecting its embedding onto the cheap→frontier complexity axis.
+  Returns `EmbeddingScore(score, tier, reason, margin, similarities)`.
+- `classifier/llm.py` — `LLMClassifier`: OPTIONAL, flag-gated. One cheap-model
+  call returning a structured `ComplexityAssessment` (0..1 score + rationale).
+  Lazy-imports `langchain-google-genai` so the default install/path never
+  needs it. Documented as the only networked stage.
+- `router.py` — full cascade `rules → embedding → (enabled + ambiguous) llm`,
+  with lazy construction of the embedding/LLM stages and graceful degradation
+  to the default tier if the embedding model can't load.
+- `config.py` — `RouterConfig` gains `embedding_model`, `embedding_temperature`,
+  `ambiguity_margin`, `use_llm_classifier`, `llm_classifier_model`.
+- Extended `demo_routing.py` (adds a SCORE column and rule-miss prompts);
+  `tests/test_classifier.py` (real-model scoring + cascade + flag-gated LLM
+  via an injected fake).
+
+**Completion signal** — demo shows rules deciding the 6 obvious prompts and
+the embedding scorer tiering the 4 rule-misses with 0..1 scores, each tagged
+with the deciding stage. `pytest` 36/36 green (bge-small downloads on first
+run, then cached).
+
+**Key decisions**
+- **Scoring = 1-D projection onto the cheap→frontier axis, anchored piecewise**
+  (cheap centroid→0.0, medium→0.5, frontier→1.0). First attempt used a
+  softmax over the three centroid similarities weighting tier *anchors* — see
+  the bug below for why that failed. The projection is a genuine monotone
+  gradient: capital-of-France 0.00 → JSON 0.17 → overview 0.43 → hash-map
+  0.65 → consistency 0.80 → halting 0.92 → rate-limiter 0.99.
+- **Kept the brief's 0.40 / 0.80 thresholds** by anchoring the score to the
+  medium centroid at 0.5, rather than retuning thresholds to a raw axis where
+  the medium centroid happened to sit at 0.39.
+- **LLM classifier trigger = ambiguity, not "always."** It fires only when
+  `use_llm_classifier` is on AND the top-two centroid similarities are within
+  `ambiguity_margin`. Pay for a model opinion only on genuine tier-boundary
+  cases. Off by default; lazy provider import.
+- **Graceful degradation.** If the embedding model can't load (offline / no
+  cache) the router logs and falls back to the default tier instead of
+  failing the route. Verified by a test that forces `_embedding_failed`.
+- **Real model in tests, not mocks.** The classifier's value *is* its
+  embeddings; mocking them would test nothing. Module-scoped fixture loads
+  bge-small once.
+
+**Bugs**
+- *Softmax-anchor averaging collapsed everything to medium.* First scorer
+  computed `score = Σ softmax(sim_i)·anchor_i` over the three tier centroids.
+  Symptom: "boiling point of water" (nearest centroid cheap) scored 0.46 →
+  medium, and a distributed-systems reasoning question (nearest centroid
+  frontier, sim 0.75) got dragged down to 0.67 → medium. Root cause: raw
+  bge cosine sims sit in a narrow band and a query is often similar to *both*
+  the cheap and frontier exemplars; averaging anchors 0.0 and 1.0 lands at
+  ≈0.5 regardless of true complexity (bimodal-average pathology). Fix:
+  replaced with the 1-D axis projection, which cannot exhibit this because it
+  reads one signed position, not a blend of two extremes. Taught: for an
+  ordinal target (a complexity *ladder*), project onto the ordinal axis;
+  don't average categorical anchors weighted by similarity.
+- *Topic gravity leaks into the complexity score.* "What year did WWII end?"
+  (a trivial date lookup) scored 0.53 → medium because "world war" embeds near
+  weighty/analytical exemplars. This is not a code bug — it is the
+  exemplar-quality bound: an embedding measures topical + stylistic
+  similarity, not reasoning depth. Documented as a known limitation; the fix
+  space is better/more exemplars or the opt-in LLM classifier for such cases.
+  Adjusted the test to an unambiguous cheap query.
+
+**Concepts reinforced** — the embedding row of the strategy table (~5ms,
+local, no network); "complexity scoring: how an embedding distance becomes a
+0..1 score" (§3) is now literally the projection method; and why the LLM
+classifier stays opt-in (it is the only stage that adds a round-trip).
+
+**Known limitations (carried forward)**
+- The classifier is heuristic, not learned; exemplar quality bounds accuracy.
+- A single cheap→frontier axis assumes medium lies roughly between the two;
+  topically neutral "medium" queries can project low (e.g. "three-sentence
+  overview" → 0.38, just under the cheap boundary). Acceptable for a
+  heuristic; a learned complexity model is the real fix (Phase 5 "what I'd do
+  differently").
+
+**Interview Q&A**
+- *Q: Why project onto an axis instead of nearest-centroid or a softmax
+  blend?* A: Complexity is ordinal (cheap < medium < frontier). A projection
+  onto the cheap→frontier direction respects that ordering and yields a smooth
+  gradient. Nearest-centroid gives no gradient; a softmax-weighted average of
+  the extreme anchors collapses "similar to both ends" queries to the middle.
+- *Q: When does the LLM classifier run, and why not always?* A: Only when
+  enabled and the embedding decision is ambiguous (tiny centroid margin).
+  Always-on would add a model round-trip and cost to every request just to
+  decide routing — the tail wagging the dog, and it couples routing
+  availability to a provider.
+- *Q: The embedding model is down — what happens?* A: The router logs it and
+  routes rule-misses to the default tier. A classifier outage degrades
+  routing quality; it never fails the request.
+- *Q: Biggest weakness of this classifier?* A: It measures semantic/topical
+  similarity, not reasoning depth, so topic can leak into the score
+  (WWII-date example). Exemplar quality is the ceiling; a learned model
+  trained on measured outcomes would be the upgrade.
