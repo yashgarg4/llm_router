@@ -38,3 +38,5 @@ Thumbs.db
 # Metrics persistence (runtime artifacts)
 *.db
 metrics_store.json
+
+INTERNAL_NOTES.md
