@@ -326,3 +326,96 @@ classifier stays opt-in (it is the only stage that adds a round-trip).
   similarity, not reasoning depth, so topic can leak into the score
   (WWII-date example). Exemplar quality is the ceiling; a learned model
   trained on measured outcomes would be the upgrade.
+
+---
+
+### Phase 3 — Fallback + verification ✅
+
+**What was built**
+- `client.py` — `ModelResponse`, a `ModelClient` protocol, `ModelCallError`
+  (with a `transient` flag), and a lazy `GeminiClient`. Separating "decide the
+  model" from "call the model" is what lets the escalation logic be tested
+  offline with a scripted fake — no key, no network.
+- `verify.py` — `verify(response, spec)` with `non_empty`, `json`, and a
+  lightweight `json_schema` (required keys + types, no extra dependency). A
+  failed check escalates via the same path as a 5xx.
+- `fallback.py` — `FallbackPolicy.on_failure(decision, error, depth)`:
+  escalates exactly one tier, returns None at the frontier or at the cap. The
+  cap is **asserted** in `__init__` (non-negative int).
+- `router.py` — `acomplete(query, metadata, verify_spec)`: the route → call →
+  (on transient error / failed verify) escalate → retry loop, returning
+  `RouteResult(success, response, final_decision, escalations, total_cost,
+  latency_ms, attempts, error)`. Costs summed from registry prices.
+- `examples/demo_fallback.py`, `tests/test_fallback.py`.
+
+**Completion signal** — `demo_fallback.py` shows: (1) a cheap-tier 5xx
+escalating exactly one tier to success, (2) a failed verification escalating
+via the same path and logged distinctly as the cascade vector, (3) a systemic
+failure escalating to the cap (cheap→medium→frontier) and then stopping —
+exactly three models called, no infinite loop. `pytest` 52/52 green.
+
+**Key decisions**
+- **Two independent bounds on escalation.** The tier ladder is finite (three
+  tiers → at most two escalations) *and* there is an explicit depth cap. Belt
+  and braces: this is the one behaviour the whole project exists to guarantee,
+  so it does not rest on a single mechanism. The cap is asserted, not merely
+  configured.
+- **Transient vs non-transient errors.** 5xx / 408 / 429 / timeouts escalate;
+  4xx re-raises without escalating. Escalating a malformed request to a
+  pricier model just burns budget for the same failure. `ModelCallError`
+  infers transience from the status code when not stated.
+- **Verification failures escalate via the *same* fallback path as 5xx**, and
+  are logged at WARNING with a loud `VERIFICATION-TRIGGERED ESCALATION`
+  marker. This is deliberate: in the origin incident (§1) it was a *verifier*,
+  not an outage, that drove the cascade. The metric that catches it (fallback
+  rate per route) lands in Phase 4; the distinct log line makes it greppable
+  now.
+- **Cost is counted whenever a response comes back** — including a response
+  that then fails verification (the provider still billed for those tokens).
+  Failed transient calls raise before returning usage, so they add nothing.
+- **Async with no test dependency.** `acomplete` is async (real providers are
+  I/O-bound); tests drive it with `asyncio.run` rather than adding
+  pytest-asyncio.
+
+**Bugs**
+- *Console encoding on the demo.* The section title used an em-dash (`—`),
+  which the Windows console (cp1252) rendered as `�`. Not a logic bug, but it
+  makes the demo output look broken. Fixed by using an ASCII hyphen in
+  printed strings. Taught: keep demo stdout ASCII-safe on Windows, or set
+  `PYTHONIOENCODING=utf-8`. (Source files stay UTF-8; only printed text was
+  changed.)
+
+**Concepts reinforced** — "fallback cascades and how they explode silently"
+(§1) is now executable: demo case 3 is precisely the uncapped scenario, and
+the cap is what turns "100% of traffic to frontier" into "at most two
+escalations then stop." The verification-triggered escalation is the specific
+silent vector, now logged.
+
+**Interview Q&A**
+- *Q: How do you stop a fallback cascade from routing everything to the most
+  expensive model?* A: Two bounds — a finite tier ladder and an asserted depth
+  cap — plus a per-route fallback-rate metric with an alert threshold
+  (Phase 4). The cap bounds the blast radius; the metric makes a spike
+  visible before the invoice does.
+- *Q: A 400 comes back from the cheap model — do you escalate?* A: No. 4xx
+  means the request is bad; a stronger model fails the same way at higher
+  cost. Only 5xx / timeouts / failed verification escalate.
+- *Q: Why route verification failures through the same escalation path as
+  outages?* A: Because to the business they are the same event — "this tier
+  didn't produce a usable answer, try a better one" — and treating them
+  identically means one fallback-rate metric catches both. The origin
+  incident was a verifier failure, so this path is the one that must be
+  observable.
+- *Q: Where do the costs in RouteResult come from?* A: `ModelSpec.cost_for`
+  using split input/output prices from `models.yaml`. Summed across every
+  attempt that returned tokens, so an escalated request honestly reports the
+  cost of *all* the models it touched, not just the final one.
+
+**Known limitations (carried forward)**
+- Real Gemini calls need `pip install langchain-google-genai` + a
+  `GOOGLE_API_KEY`; Phase 3 is validated with a scripted fake client (the
+  escalation logic is provider-agnostic). Real end-to-end calls are exercised
+  in Phase 5.
+- Failed-transient calls contribute no cost because the fake/real clients
+  raise before returning usage; a provider that bills failed calls would
+  under-report. Acceptable until real usage metadata is wired in Phase 5.

@@ -7,13 +7,18 @@ Public API (grows by phase):
   * RouteDecision     — the routing result                        [Phase 1]
   * Tier              — cheap / medium / frontier                 [Phase 1]
 
-``Router.acomplete`` (call the chosen model with capped, logged escalation)
-arrives in Phase 3.
+  * Router.acomplete    — call chosen model, capped+logged escalation [Phase 3]
+  * RouteResult         — response + escalations + cost + latency      [Phase 3]
+  * FallbackPolicy      — one-tier-up, capped escalation               [Phase 3]
+  * verify / ModelClient — verification hooks, model-call abstraction  [Phase 3]
 """
 
+from .client import GeminiClient, ModelCallError, ModelClient, ModelResponse
 from .config import PolicyConfig, RouterConfig
+from .fallback import FallbackPolicy
 from .registry import ModelRegistry, ModelSpec, RouteDecision, Tier
-from .router import Router
+from .router import EscalationRecord, RouteResult, Router
+from .verify import verify
 
 __all__ = [
     "Router",
@@ -23,6 +28,14 @@ __all__ = [
     "ModelSpec",
     "RouteDecision",
     "Tier",
+    "RouteResult",
+    "EscalationRecord",
+    "FallbackPolicy",
+    "verify",
+    "ModelClient",
+    "ModelResponse",
+    "ModelCallError",
+    "GeminiClient",
 ]
 
 __version__ = "0.1.0"

@@ -5,8 +5,8 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![pydantic](https://img.shields.io/badge/pydantic-v2-e92063)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-Phase%202-orange)
-![Tests](https://img.shields.io/badge/tests-36%20passing-brightgreen)
+![Status](https://img.shields.io/badge/status-Phase%203-orange)
+![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
 
 `llmrouter` sits between your application and multiple LLMs. For every request
 it classifies complexity, routes to the *cheapest model that is good enough*,
@@ -33,8 +33,8 @@ before it shows up on the invoice.
 | Rule-based routing (keywords, token count, explicit override) | ✅ Phase 1 |
 | Embedding complexity classifier (local, ~5ms) | ✅ Phase 2 |
 | Optional LLM classifier (opt-in, flag-gated) | ✅ Phase 2 |
-| Capped, logged failure escalation | 🔜 Phase 3 |
-| Output verification hooks (json-schema, non-empty) | 🔜 Phase 3 |
+| Capped, logged failure escalation | ✅ Phase 3 |
+| Output verification hooks (json-schema, non-empty) | ✅ Phase 3 |
 | Per-route metrics + alert threshold | 🔜 Phase 4 |
 | Streamlit dashboard (tier split, fallback-rate cascade detector) | 🔜 Phase 4 |
 | OpenAI-compatible proxy | 🔜 Phase 5 |
