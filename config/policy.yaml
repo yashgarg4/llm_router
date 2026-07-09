@@ -1,0 +1,89 @@
+# llmrouter — routing policy
+#
+# This file is the *policy* (how to decide a tier); models.yaml is the
+# *registry* (what each tier costs / can do). Keeping them separate means
+# you can retune routing thresholds without touching pricing and vice versa.
+
+# ---------------------------------------------------------------------------
+# Tier thresholds — map a 0..1 complexity score to a tier.
+# Used by the Phase 2 embedding scorer. score < cheap_max -> cheap, etc.
+# ---------------------------------------------------------------------------
+thresholds:
+  cheap_max: 0.40      # score in [0.00, 0.40)  -> cheap
+  medium_max: 0.80     # score in [0.40, 0.80)  -> medium
+  # score in [0.80, 1.00] -> frontier
+
+# ---------------------------------------------------------------------------
+# Rule-based classifier (Phase 1). Rules run first — sub-1ms, deterministic,
+# no embedding, no LLM. A rule match short-circuits the cascade.
+# ---------------------------------------------------------------------------
+rules:
+  # Keyword -> tier. Matched case-insensitively on word boundaries against
+  # the query text. cheap keywords are cheap-tier tasks; frontier keywords
+  # signal reasoning-grade work.
+  keywords:
+    cheap:
+      - classify
+      - categorize
+      - categorise
+      - extract
+      - translate
+      - format
+      - reformat
+      - lowercase
+      - uppercase
+      - label
+      - tag
+    frontier:
+      - reason
+      - prove
+      - proof
+      - debug
+      - design
+      - architect
+      - derive
+      - optimize
+      - optimise
+      - refactor
+      - algorithm
+
+  # Token-count rule: if the estimated prompt token count exceeds this, the
+  # query needs a large-context-capable model. The router uses this to force
+  # selection of a model whose max_context can hold the prompt.
+  large_context_token_threshold: 200000
+
+  # Rough tokens-per-character estimate for the cheap heuristic token count
+  # (real tokenizer not needed for routing; ~4 chars/token is standard).
+  chars_per_token: 4
+
+# ---------------------------------------------------------------------------
+# Exemplar queries per tier (Phase 2). The embedding classifier embeds these
+# once at startup and scores an incoming query by similarity to each tier's
+# centroid. Quality of these exemplars bounds classifier accuracy.
+# ---------------------------------------------------------------------------
+exemplars:
+  cheap:
+    - "Classify this review as positive or negative."
+    - "Extract all email addresses from this text."
+    - "Translate this sentence into French."
+    - "Convert this JSON to a CSV row."
+    - "What is the capital of France?"
+    - "Reformat this date as YYYY-MM-DD."
+  medium:
+    - "Summarise this article in three sentences."
+    - "Draft a polite reply declining this meeting."
+    - "Explain what a hash map is to a beginner."
+    - "Write a short product description for these features."
+    - "Rewrite this paragraph to be more concise."
+  frontier:
+    - "Prove that the square root of two is irrational."
+    - "Debug this race condition in the async worker pool."
+    - "Design a rate limiter for a distributed API gateway."
+    - "Derive the time complexity of this recursive algorithm."
+    - "Refactor this module to remove the circular dependency."
+    - "Plan a multi-step migration from monolith to microservices."
+
+# ---------------------------------------------------------------------------
+# Default tier when no rule matches and the scorer is unavailable (Phase 1).
+# ---------------------------------------------------------------------------
+default_tier: medium

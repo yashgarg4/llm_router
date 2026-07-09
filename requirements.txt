@@ -1,0 +1,30 @@
+# llmrouter — pinned dependencies
+#
+# Phase 1 (registry + rule-based routing) needs only the lightweight core:
+#   pydantic, pyyaml, python-dotenv, pytest
+# The heavier ML / server deps (sentence-transformers, fastapi, streamlit,
+# langchain-google-genai) are pulled in from Phase 2 onward. They are listed
+# here so `pip install -r requirements.txt` provisions the whole stack, but
+# Phase 1 can run with just the core group below.
+
+# --- Core (Phase 1) ---
+pydantic==2.11.7
+pyyaml==6.0.2
+python-dotenv==1.1.1
+
+# --- Classifier / embeddings (Phase 2) ---
+sentence-transformers==5.1.0
+numpy==2.3.2
+
+# --- Server / proxy (Phase 3+) ---
+fastapi==0.116.1
+uvicorn==0.35.0
+
+# --- LLM provider (Phase 3+) ---
+langchain-google-genai==2.1.8
+
+# --- Dashboard (Phase 4) ---
+streamlit==1.47.1
+
+# --- Testing ---
+pytest==8.4.1

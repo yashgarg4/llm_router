@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmrouter"
+version = "0.1.0"
+description = "Cost- and quality-aware LLM router with per-route observability"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.11",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.1",
+]
+
+[project.optional-dependencies]
+classifier = ["sentence-transformers>=5.1", "numpy>=2.3"]
+server = ["fastapi>=0.116", "uvicorn>=0.35"]
+llm = ["langchain-google-genai>=2.1"]
+dashboard = ["streamlit>=1.47"]
+dev = ["pytest>=8.4"]
+
+[tool.setuptools.packages.find]
+include = ["llmrouter*", "server*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

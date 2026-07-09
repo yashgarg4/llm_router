@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Environment / secrets
+.env
+.env.local
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.dspy_cache/
+.cache/
+
+# Model / embedding caches (local sentence-transformers)
+.hf_cache/
+models_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Metrics persistence (runtime artifacts)
+*.db
+metrics_store.json

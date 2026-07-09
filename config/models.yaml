@@ -1,0 +1,46 @@
+# llmrouter — model registry
+#
+# Prices live here, NEVER in code. A rate change is a config edit, not a
+# code change + redeploy. Split input/output pricing (per 1M tokens, USD)
+# mirrors semcache's approach so cost math is consistent across the stack.
+#
+# tier meaning:
+#   cheap    -> classify / extract / format / translate  (highest volume)
+#   medium   -> summarise / draft / simple QA
+#   frontier -> reasoning / code / multi-step / proofs
+#
+# When multiple models share a tier, the router picks the cheapest whose
+# capabilities (context, tools) satisfy the request.
+
+models:
+  - name: gemini-3.1-flash-lite
+    tier: cheap
+    provider: google
+    input_cost_per_1m: 0.10
+    output_cost_per_1m: 0.40
+    max_context: 1000000
+    supports_tools: true
+
+  - name: gemini-3-flash
+    tier: medium
+    provider: google
+    input_cost_per_1m: 0.30
+    output_cost_per_1m: 1.20
+    max_context: 1000000
+    supports_tools: true
+
+  - name: gemini-3.5-flash
+    tier: frontier
+    provider: google
+    input_cost_per_1m: 0.60
+    output_cost_per_1m: 2.40
+    max_context: 1000000
+    supports_tools: true
+
+  - name: gemini-3.5-pro
+    tier: frontier
+    provider: google
+    input_cost_per_1m: 1.25
+    output_cost_per_1m: 10.00
+    max_context: 2000000
+    supports_tools: true
