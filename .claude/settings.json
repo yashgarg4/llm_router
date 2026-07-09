@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.venv/Scripts/python.exe examples/demo_fallback.py)"
+      "Bash(.venv/Scripts/python.exe examples/demo_fallback.py)",
+      "Bash(.venv/Scripts/python.exe -m pip install \"fastapi==0.116.1\" \"uvicorn==0.35.0\" \"streamlit==1.47.1\")",
+      "Bash(rm -f metrics_store.json /tmp/st.log; echo \"cleaned\")"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

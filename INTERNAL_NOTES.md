@@ -419,3 +419,91 @@ silent vector, now logged.
 - Failed-transient calls contribute no cost because the fake/real clients
   raise before returning usage; a provider that bills failed calls would
   under-report. Acceptable until real usage metadata is wired in Phase 5.
+
+---
+
+### Phase 4 — Per-route metrics + dashboard ✅
+
+**What was built**
+- `metrics.py` — `RouteMetrics`: `record` / `record_result`, `by_route`,
+  `by_tier`, `fallback_rate(tier)`, `savings_vs_baseline`, `alert_check`,
+  `fallback_rate_series` (rolling, for the line chart), `snapshot`, JSON
+  persistence (`save_metrics`/`load_metrics`), and `simulate_metrics` which
+  reproduces the incident (healthy period → cheap-tier failure spike).
+- `server/dashboard.py` — FastAPI metrics REST: `/metrics`, `/by-route`,
+  `/by-tier`, `/alerts`, `/timeseries`, `/health`.
+- `dashboard/app.py` — Streamlit dashboard: KPI row (total cost, saved
+  vs all-frontier, overall fallback rate vs threshold, request volume), tier
+  distribution, fallback-rate-over-time line with the threshold drawn on it,
+  and a per-route table that highlights routes over the threshold.
+- `tests/test_metrics.py`; Makefile `dashboard` + `proxy-metrics` targets.
+
+**Completion signal** — the simulated workload (320 requests) shows a tier
+split (cheap 67%, medium 22%, frontier 11%), 54% cost saved vs all-frontier,
+and a cheap-tier fallback rate of 36% that trips the alert (both tier and
+route scope). The rolling fallback line runs 0.00 → 0.47 across the sequence,
+visibly crossing the 0.25 threshold during the spike — exactly the panel that
+would have caught the origin incident. `pytest` 62/62 green; the Streamlit app
+boots headless and serves HTTP 200; the REST handlers return correct payloads.
+
+**Key decisions**
+- **"route" = the entry point, not the final model.** A request is attributed
+  to the tier/model it was *initially* routed to (the first escalation's
+  `from_*`, or the final decision if it never escalated). This is the unit
+  whose health matters: a broken cheap-tier verifier shows up as the *cheap
+  route's* fallback rate spiking, which is precisely the incident. Attributing
+  to the final model would smear the signal across whatever tiers absorbed the
+  overflow and hide the cause.
+- **Cost is attributed to the entry route, summed across all attempts.** So an
+  escalating route reports its true inflated cost — the cheap route in the sim
+  shows a per-request avg cost dragged up by all the medium/frontier retries.
+- **`alert_check` flags both tiers and routes.** The brief specifies tiers;
+  routes are included because in a multi-model tier the offending *model* is
+  the actionable unit. Both fire in the sim (they coincide here since each
+  tier has one entry model).
+- **`savings_vs_baseline` needs per-request tokens**, so `record` stores input/
+  output token counts (an addition beyond the brief's listed signature — the
+  counterfactual "what would all-frontier have cost" is un-computable without
+  them). Prices for the baseline come from the registry, never hardcoded.
+- **A JSON store decouples producer from viewer.** The proxy (Phase 5) writes
+  `metrics_store.json`; the dashboard and REST read it. The dashboard's
+  simulation writes the same file so the REST API mirrors what's on screen.
+- **Simulation is ordered healthy-then-spike** so the rolling line *rises*
+  across time — a flat average would hide the very dynamic the panel exists to
+  show.
+
+**Bugs**
+- *FastAPI TestClient needs httpx, which isn't installed.* Rather than add a
+  dependency just to smoke-test the API, I called the route handlers directly
+  (they are plain functions returning dicts) and verified payloads that way.
+  Taught: FastAPI handlers are ordinary callables — you don't need an HTTP
+  client (or a running server) to unit-test their logic; reserve httpx/TestClient
+  for testing actual HTTP behaviour (status codes, serialisation, middleware).
+- *Runtime artifact leaked into the working tree.* The REST smoke test created
+  `metrics_store.json`; it's gitignored, but I removed it to keep the tree
+  clean. Noted that the store path is relative to CWD — the proxy should write
+  it to a configured location in Phase 5, not wherever it happens to run.
+
+**Concepts reinforced** — "cost vs quality routing, and why per-route metrics
+matter" (§3) is now the whole module: the dashboard makes the abstract "watch
+your fallback rate" concrete. The alert threshold line on the timeseries *is*
+the defence the origin incident lacked.
+
+**Interview Q&A**
+- *Q: What one panel would have caught the 90%-escalation incident?* A: The
+  per-route fallback-rate — either the rolling line crossing the alert
+  threshold, or the per-route table row for the cheap entry model turning red.
+  Traffic volume was unchanged, so only a *ratio* per route reveals it.
+- *Q: Why attribute cost/fallback to the entry route rather than the model
+  that served the request?* A: The entry route is the cause; the serving model
+  is the symptom. Attributing to the entry point localises the failure to the
+  tier whose verifier/health broke. Attributing to the final model would show
+  "frontier volume went up" with no hint why.
+- *Q: How do you compute savings honestly?* A: Counterfactual — price every
+  request's actual tokens against the baseline (all-frontier) model from the
+  registry, and compare to actual summed cost. It depends on workload mix and
+  is reported as such (54% in the sim), never as a fixed marketing number.
+- *Q: Why a rolling window for the fallback timeseries instead of a cumulative
+  average?* A: A cumulative average is dominated by history and lags a spike;
+  a rolling window responds quickly, so the line crosses the threshold when
+  the incident starts, not long after.

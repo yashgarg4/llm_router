@@ -16,6 +16,7 @@ Public API (grows by phase):
 from .client import GeminiClient, ModelCallError, ModelClient, ModelResponse
 from .config import PolicyConfig, RouterConfig
 from .fallback import FallbackPolicy
+from .metrics import Alert, RouteMetrics, RouteStats, Savings, TierStats, simulate_metrics
 from .registry import ModelRegistry, ModelSpec, RouteDecision, Tier
 from .router import EscalationRecord, RouteResult, Router
 from .verify import verify
@@ -36,6 +37,12 @@ __all__ = [
     "ModelResponse",
     "ModelCallError",
     "GeminiClient",
+    "RouteMetrics",
+    "RouteStats",
+    "TierStats",
+    "Alert",
+    "Savings",
+    "simulate_metrics",
 ]
 
 __version__ = "0.1.0"

@@ -5,8 +5,8 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![pydantic](https://img.shields.io/badge/pydantic-v2-e92063)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-Phase%203-orange)
-![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![Status](https://img.shields.io/badge/status-Phase%204-orange)
+![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)
 
 `llmrouter` sits between your application and multiple LLMs. For every request
 it classifies complexity, routes to the *cheapest model that is good enough*,
@@ -35,8 +35,8 @@ before it shows up on the invoice.
 | Optional LLM classifier (opt-in, flag-gated) | ✅ Phase 2 |
 | Capped, logged failure escalation | ✅ Phase 3 |
 | Output verification hooks (json-schema, non-empty) | ✅ Phase 3 |
-| Per-route metrics + alert threshold | 🔜 Phase 4 |
-| Streamlit dashboard (tier split, fallback-rate cascade detector) | 🔜 Phase 4 |
+| Per-route metrics + alert threshold | ✅ Phase 4 |
+| Streamlit dashboard (tier split, fallback-rate cascade detector) | ✅ Phase 4 |
 | OpenAI-compatible proxy | 🔜 Phase 5 |
 | Compose with `semcache` (cache in front) + `tracely` (spans) | 🔜 Phase 5 |
 
@@ -106,6 +106,32 @@ Classify this customer review...  cheap     gemini-3.1-flash-lite  rules     che
 Prove that there are infinitel... frontier  gemini-3.5-flash       rules     frontier keyword matched: 'Prove'
 Tell me something interesting...  medium    gemini-3-flash         default   no rule matched; default tier -> medium
 ```
+
+## Metrics & dashboard
+
+The per-route metrics layer is the cascade-explosion detector. Run the REST
+API and the Streamlit dashboard:
+
+```bash
+make dashboard      # streamlit run dashboard/app.py   (the visual panel)
+make proxy-metrics  # uvicorn server.dashboard:app     (REST: /metrics, /by-route, /alerts)
+```
+
+The dashboard's sidebar simulates a **cheap-tier failure spike** (the origin
+incident). Push the failure-rate slider up and the rolling fallback-rate line
+rises and crosses the red alert threshold — the exact panel that would have
+caught a silent 90% escalation before the invoice did. The per-route table
+highlights any route whose fallback rate breaches the threshold.
+
+REST endpoints:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /metrics` | snapshot: total cost, overall fallback rate, savings, by-tier, alerts |
+| `GET /by-route` | per-route table (volume, avg cost, avg latency, fallback rate) |
+| `GET /by-tier` | per-tier aggregates |
+| `GET /alerts` | routes/tiers over the fallback-rate threshold |
+| `GET /timeseries` | rolling fallback rate over the request sequence |
 
 ## Cost savings — honest framing
 
