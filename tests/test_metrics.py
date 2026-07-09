@@ -30,7 +30,7 @@ def test_by_tier_and_route_counts(registry) -> None:
                  cost=0.001, latency_ms=300, escalated=(i == 0),
                  classifier_used="rules")
     for _ in range(2):
-        m.record("gemini-3-flash", Tier.MEDIUM, "gemini-3-flash",
+        m.record("gemini-3-flash-preview", Tier.MEDIUM, "gemini-3-flash-preview",
                  cost=0.002, latency_ms=600, escalated=False,
                  classifier_used="embedding")
 
@@ -75,7 +75,7 @@ def test_alert_check_fires_over_threshold(registry) -> None:
     m = _mk(registry, threshold=0.25)
     # cheap tier: 9/10 escalated -> 90% >> 25%
     for i in range(10):
-        m.record("gemini-3.1-flash-lite", Tier.CHEAP, "gemini-3-flash",
+        m.record("gemini-3.1-flash-lite", Tier.CHEAP, "gemini-3-flash-preview",
                  0.003, 500, escalated=(i > 0), classifier_used="rules")
     alerts = m.alert_check()
     assert any(a.scope == "tier" and a.key == "cheap" for a in alerts)

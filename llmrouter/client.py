@@ -53,10 +53,16 @@ class ModelCallError(Exception):
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
-        # Infer transience from the status code if not stated explicitly:
-        # 5xx and timeouts (408/504) are transient; other 4xx are not.
+        # Infer transience from the status code if not stated explicitly.
+        # Escalation triggers are 5xx and timeouts (408/504) only. A 429
+        # (rate limit) is deliberately NOT transient: escalating to a sibling
+        # model shares the same project quota, so it wouldn't help — the right
+        # response to 429 is backoff, not a pricier model. 4xx are bad
+        # requests; a stronger model fails the same way.
         if transient is None:
-            transient = status_code is None or status_code >= 500 or status_code in (408, 429)
+            transient = (
+                status_code is None or status_code >= 500 or status_code in (408, 504)
+            )
         self.transient = transient
 
 

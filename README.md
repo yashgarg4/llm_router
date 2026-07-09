@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![pydantic](https://img.shields.io/badge/pydantic-v2-e92063)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-Phase%204-orange)
+![Status](https://img.shields.io/badge/status-complete-brightgreen)
 ![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)
 
 `llmrouter` sits between your application and multiple LLMs. For every request
@@ -37,8 +37,8 @@ before it shows up on the invoice.
 | Output verification hooks (json-schema, non-empty) | ✅ Phase 3 |
 | Per-route metrics + alert threshold | ✅ Phase 4 |
 | Streamlit dashboard (tier split, fallback-rate cascade detector) | ✅ Phase 4 |
-| OpenAI-compatible proxy | 🔜 Phase 5 |
-| Compose with `semcache` (cache in front) + `tracely` (spans) | 🔜 Phase 5 |
+| OpenAI-compatible proxy | ✅ Phase 5 |
+| Compose with `semcache` (cache in front) + `tracely` (spans) | ✅ Phase 5 |
 
 ## Architecture
 
@@ -104,7 +104,7 @@ model, deciding classifier stage, and reason:
 QUERY                             TIER      MODEL                  VIA       REASON
 Classify this customer review...  cheap     gemini-3.1-flash-lite  rules     cheap keyword matched: 'Classify'
 Prove that there are infinitel... frontier  gemini-3.5-flash       rules     frontier keyword matched: 'Prove'
-Tell me something interesting...  medium    gemini-3-flash         default   no rule matched; default tier -> medium
+Tell me something interesting...  medium    gemini-3-flash-preview embedding embedding score 0.45 -> medium
 ```
 
 ## Metrics & dashboard
@@ -142,11 +142,21 @@ Savings depend entirely on your **workload mix**, not on a magic number.
 - A **reasoning-heavy** workload that genuinely needs the frontier model most
   of the time saves little — maybe **30%** — because the router correctly
   routes it up anyway.
-- Measured combined numbers (router + `semcache` in front) land in Phase 5;
-  this section will be updated with the real figures from a fixed workload.
 
-The router only saves money when a cheaper model is *actually sufficient*.
-It will not, and should not, save money by under-serving hard prompts.
+**Measured** (`examples/demo_with_semcache.py`, 20-request repetitive workload,
+real Gemini calls, vs an all-frontier-no-cache baseline):
+
+| Configuration | Cost | Saving vs baseline |
+|---|--:|--:|
+| all-frontier, no cache (baseline) | $0.002169 | — |
+| router, no cache | $0.000973 | **55%** |
+| router + semcache (55% cache-hit rate) | $0.000810 | **63%** |
+
+Routing did the heavy lifting (55%); the semantic cache added 8 points on top
+by serving repeats and paraphrases with no model call. These numbers are
+workload-specific — a cheap-heavy, repetitive workload saves most. The router
+only saves money when a cheaper model is *actually sufficient*; it will not,
+and should not, save by under-serving hard prompts.
 
 ## Model registry
 
@@ -171,29 +181,108 @@ in [`config/policy.yaml`](config/policy.yaml).
 ```
 llmrouter/
 ├── llmrouter/
-│   ├── __init__.py        # Router, RouterConfig, ModelRegistry, RouteDecision, Tier
-│   ├── registry.py        # model registry + shared routing types
+│   ├── __init__.py        # public API (Router, RouteResult, RouteMetrics, …)
+│   ├── registry.py        # model registry + shared routing types (Tier, RouteDecision)
 │   ├── config.py          # PolicyConfig, RouterConfig
-│   ├── router.py          # the routing cascade
-│   └── classifier/
-│       └── rules.py       # rule-based classifier (Phase 1)
-├── config/
-│   ├── models.yaml        # model registry
-│   └── policy.yaml        # tier thresholds, rules, exemplars
-├── examples/demo_routing.py
+│   ├── router.py          # the routing cascade + acomplete() with escalation
+│   ├── classifier/
+│   │   ├── rules.py       # rule-based classifier (keywords, tokens, override)
+│   │   ├── embedding.py   # embedding complexity scorer (cheap→frontier axis)
+│   │   └── llm.py         # OPTIONAL llm classifier (flag-gated)
+│   ├── fallback.py        # capped, logged escalation
+│   ├── verify.py          # output verification hooks
+│   ├── client.py          # ModelClient protocol + lazy GeminiClient
+│   ├── metrics.py         # per-route metrics, savings, alerts, simulation
+│   └── tracing.py         # optional tracely/OTLP routing spans
+├── server/
+│   ├── proxy.py           # OpenAI-compatible /v1/chat/completions
+│   └── dashboard.py       # metrics REST API
+├── dashboard/app.py       # Streamlit per-route dashboard
+├── config/{models,policy}.yaml
+├── examples/{demo_routing,demo_fallback,demo_with_semcache}.py
 ├── tests/
 ├── INTERNAL_NOTES.md      # engineering log — read this to understand "why"
 └── pyproject.toml
+```
+
+## Integration
+
+### As an OpenAI-compatible proxy
+
+```bash
+make proxy   # uvicorn server.proxy:app --reload   (needs GOOGLE_API_KEY)
+```
+
+Point any OpenAI client at it; the router picks the model. The decision is
+returned in response headers:
+
+```
+x-llmrouter-tier          tier that served the request (after any escalation)
+x-llmrouter-model         model that produced the response
+x-llmrouter-escalations   how many tiers it had to climb
+x-llmrouter-classifier    which stage decided (rules / embedding / llm / default)
+x-llmrouter-cost-usd      total cost of the request (all attempts)
+```
+
+### Compose with semcache (cache in front)
+
+A semantic cache in front of the router serves repeats/paraphrases with no
+model call; misses route normally. See
+[`examples/demo_with_semcache.py`](examples/demo_with_semcache.py) — set
+`SEMCACHE_PATH` to your semcache checkout. The flow:
+
+```
+request ─▶ semcache.get(query)
+              ├─ hit  ─▶ return cached response         (no routing, no model call)
+              └─ miss ─▶ router.acomplete(query) ─▶ semcache.put(query, response)
+```
+
+### Emit tracely spans (optional)
+
+Set `TRACELY_OTLP_ENDPOINT` (and optionally `TRACELY_SDK_PATH` to your meridian
+checkout) and the proxy emits a `router.decision` span per request with the
+tier, model, score, classifier, escalations, cost, and latency. Unset ⇒ no
+tracing.
+
+## API reference
+
+```python
+from llmrouter import Router, RouterConfig
+
+router = Router.from_config(RouterConfig())
+
+# Synchronous decision only (no model call):
+decision = router.route("Summarise this.", metadata={})
+decision.tier, decision.model.name, decision.classifier_used, decision.score
+
+# Full completion with capped, logged escalation + optional verification:
+result = await router.acomplete(
+    "Extract the invoice total as JSON.",
+    verify_spec={"check": "json_schema", "required": ["total"]},
+)
+result.success, result.response.text, result.escalations, result.total_cost
+```
+
+Metrics:
+
+```python
+from llmrouter import RouteMetrics
+m = RouteMetrics(registry=router.registry)
+m.record_result(result)
+m.by_route(); m.fallback_rate(); m.savings_vs_baseline("frontier"); m.alert_check()
 ```
 
 ## Environment variables
 
 | Var | Needed from | Purpose |
 |---|---|---|
-| `GOOGLE_API_KEY` | Phase 3 | Gemini API calls (Phase 1 makes none) |
+| `GOOGLE_API_KEY` | real calls | Gemini API calls (routing decisions make none) |
 | `LLMROUTER_MODELS_CONFIG` | optional | override registry path |
 | `LLMROUTER_POLICY_CONFIG` | optional | override policy path |
-| `TRACELY_OTLP_ENDPOINT` | Phase 5, optional | emit routing spans |
+| `TRACELY_OTLP_ENDPOINT` | optional | emit routing spans (unset ⇒ tracing off) |
+| `TRACELY_SDK_PATH` | optional | meridian checkout for the tracely SDK |
+| `SEMCACHE_PATH` | optional | semcache checkout for the compose demo |
+| `LLMROUTER_THROTTLE` | optional | seconds between real calls (free-tier RPM) |
 
 Copy `.env.example` → `.env`.
 

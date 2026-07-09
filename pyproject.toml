@@ -20,6 +20,11 @@ classifier = ["sentence-transformers>=5.1", "numpy>=2.3"]
 server = ["fastapi>=0.116", "uvicorn>=0.35"]
 llm = ["langchain-google-genai>=2.1"]
 dashboard = ["streamlit>=1.47"]
+cache = ["faiss-cpu>=1.14"]  # compose semcache in front (its vector store)
+tracing = [  # tracely/meridian routing spans (OTLP-HTTP)
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp-proto-http>=1.24",
+]
 dev = ["pytest>=8.4"]
 
 [tool.setuptools.packages.find]

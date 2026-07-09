@@ -507,3 +507,137 @@ the defence the origin incident lacked.
   average?* A: A cumulative average is dominated by history and lags a spike;
   a rolling window responds quickly, so the line crosses the threshold when
   the incident starts, not long after.
+
+---
+
+### Phase 5 — Integration + polish ✅
+
+**What was built**
+- `server/proxy.py` — OpenAI-compatible `POST /v1/chat/completions`: routes the
+  last user message, calls the real model with capped escalation, returns a
+  standard chat-completion body, and exposes the decision in headers
+  (`x-llmrouter-tier|model|escalations|classifier|cost-usd`). Records every
+  request into the metrics store and emits a span if tracing is on.
+- `llmrouter/tracing.py` — `RouterTracer`: emits a `router.decision` span per
+  request. Backend resolution: tracely SDK (loaded standalone) → raw OTLP →
+  disabled. No-op unless `TRACELY_OTLP_ENDPOINT` is set.
+- `examples/demo_with_semcache.py` — semcache in front of the router with real
+  Gemini calls, throttled for the free-tier RPM limit; reports all-frontier vs
+  router-only vs router+cache on one workload.
+- Registry updated to **real, callable Gemini IDs** (verified against the
+  Generative Language API); requirements/pyproject gained `cache` + `tracing`
+  extras; `.env.example`, Makefile, README finalised.
+
+**Completion signal — measured, real calls** (20-request repetitive workload):
+| Configuration | Cost | Saving |
+|---|--:|--:|
+| all-frontier, no cache | $0.002169 | baseline |
+| router, no cache | $0.000973 | 55% |
+| router + semcache (55% hit rate) | $0.000810 | **63%** |
+Proxy returns the routing headers; `pytest` 62/62 green; the tracely
+`router.decision` span emits with full attributes.
+
+**Key decisions**
+- **Compose without installing the neighbours as packages.** semcache is added
+  via `sys.path` (it just needs faiss + our existing sentence-transformers);
+  tracely's `tracer.py` is loaded *standalone* with importlib because importing
+  the `meridian` package runs an `__init__` that eagerly pulls langgraph/wrapt
+  patchers we don't want. Loading the one module we need keeps the dependency
+  surface minimal and is genuinely "reuse tracely's OTLP approach".
+- **Graceful tracing degradation** tracely SDK → raw OTLP → off. The core
+  router never depends on a tracing backend being reachable; a dead collector
+  logs a transient export error and the request still succeeds.
+- **429 is NOT an escalation trigger.** Rate limits share the project quota, so
+  escalating to a sibling model wouldn't help — the correct response is
+  backoff. Only 5xx and timeouts (408/504) escalate. The demo throttles real
+  calls to stay under the free-tier RPM rather than relying on escalation.
+- **Route on the last user message.** The proxy classifies and generates on the
+  last user turn; enough for the demo and keeps the client abstraction
+  (`acomplete(query, …)`) simple. Full multi-turn context is a future item.
+
+**Bugs**
+- *Two of the brief's model IDs weren't callable.* `gemini-3-flash` and
+  `gemini-3.5-pro` 404 against the live API; the real IDs are
+  `gemini-3-flash-preview` and `gemini-3.1-pro-preview`. Discovered by listing
+  the API's models with the key *before* wiring real calls (cheap check that
+  saved a confusing 404 mid-demo). Fixed the registry and the three tests that
+  hardcoded the medium model name. Taught: verify model IDs against the
+  provider's ListModels at integration time — a config registry is only as
+  correct as the IDs in it.
+- *`meridian` import pulled langgraph.* `from meridian.tracer import …` runs
+  `meridian/__init__.py`, which imports wrapt/langgraph patchers → ImportError.
+  Fixed by loading `tracer.py` via `importlib.util.spec_from_file_location`
+  (it has no intra-package imports, only opentelemetry). Taught: to use one
+  module from a package with a heavy `__init__`, load the file directly.
+- *`dotenv.find_dotenv()` crashes under a stdin heredoc* (`assert frame.f_back
+  is not None` — no `__file__`). Used `dotenv_values(".env")` with an explicit
+  path in throwaway checks. Only affects `python - <<EOF` invocations, not the
+  real scripts (which have `__file__`).
+
+**Concepts reinforced** — the "compose with a cache in front" story is now
+measured: routing and caching are *orthogonal* savings (routing picks a cheaper
+model per call; caching removes calls entirely), so they stack — 55% + 8%.
+
+---
+
+## 6. Known limitations (consolidated)
+
+- **The classifier is heuristic, not learned.** Rules are hand-written;
+  embedding scoring is similarity to hand-picked exemplars. Exemplar quality is
+  the accuracy ceiling.
+- **Embeddings measure topic/style, not reasoning depth.** Topic gravity leaks
+  into the score ("what year did WWII end?" → medium). More/better exemplars or
+  the opt-in LLM classifier mitigate; a learned model would fix it.
+- **Single cheap→frontier complexity axis** assumes medium lies between the
+  ends; topically neutral medium queries can project low.
+- **No learned routing from outcomes.** The router never observes whether a
+  cheap answer was actually good enough; it can't yet learn "this kind of
+  prompt escalates, route it up front."
+- **Cost of failed calls** isn't counted (clients raise before returning
+  usage); a provider that bills failures would under-report.
+- **Proxy routes on the last user message only** (no multi-turn context) and
+  writes the metrics store relative to CWD.
+- **Single provider (Gemini).** Tiers map to one vendor; cross-provider routing
+  (cheapest sufficient model *across* vendors) is not implemented.
+
+## 7. What I'd do differently / next
+
+- **Learned complexity model.** Replace exemplar similarity with a small
+  classifier trained on labelled prompts (or distilled from the LLM
+  classifier's judgements), removing the topic-gravity failure mode.
+- **RL / bandit routing on measured outcomes.** Treat each route as an arm;
+  reward = quality (from verification / user signal) minus cost. Learn per
+  prompt-type which tier is *actually* sufficient, instead of a static score →
+  tier map. This directly attacks the "heuristic, not learned" limitation.
+- **Multi-provider registry.** Same YAML, multiple vendors; pick the cheapest
+  sufficient model across all of them, with per-provider health feeding the
+  fallback policy.
+- **Backoff-and-retry for 429**, distinct from tier escalation.
+- **Persist metrics to a real store** (sqlite/OTLP metrics) instead of a JSON
+  file, and drive `alert_check` from a background monitor that pages on a
+  sustained breach rather than a single window.
+
+## 8. Consolidated interview Q&A
+
+- *Q: One-sentence pitch?* A: A cost- and quality-aware LLM router that sends
+  each request to the cheapest model good enough, escalates on failure (capped
+  + logged), and tracks fallback rate per route so a cascade shows up on a
+  dashboard before it shows up on the bill.
+- *Q: The single most important design choice?* A: Making per-route
+  observability core, not an add-on — specifically a fallback-rate metric with
+  an alert threshold and a hard escalation cap, because the failure mode that
+  motivates the whole project (silent cascade to the frontier model) is
+  invisible without it.
+- *Q: Walk the request path.* A: rules (sub-1ms) → embedding scorer (~5ms) →
+  optional LLM classifier (opt-in) picks a tier → cheapest sufficient model →
+  call → on 5xx/timeout/failed-verify escalate one tier (capped, logged) →
+  record cost/latency/fallback per entry route → optional span.
+- *Q: Why is the router not a latency problem?* A: A regex + one local
+  embedding is single-digit ms against a model call of hundreds to thousands of
+  ms; picking a cheaper/faster model usually makes the *total* faster.
+- *Q: How do routing and caching relate?* A: Orthogonal. Caching removes calls
+  (repeats/paraphrases); routing makes the calls that remain cheaper. They
+  stack — measured 55% (routing) + 8% (cache) = 63%.
+- *Q: Biggest weakness and the fix?* A: The classifier is heuristic and
+  conflates topic with complexity; the fix is a learned complexity model and,
+  further, RL/bandit routing on measured quality-vs-cost outcomes.

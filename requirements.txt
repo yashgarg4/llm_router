@@ -28,3 +28,12 @@ streamlit==1.47.1
 
 # --- Testing ---
 pytest==8.4.1
+
+# --- Integrations (Phase 5, optional) ---
+# semcache (compose a semantic cache in front) needs FAISS for its vector store:
+faiss-cpu==1.14.3
+# tracely/meridian routing spans export via OTLP-HTTP (only used if
+# TRACELY_OTLP_ENDPOINT is set; raw OTLP fallback needs these):
+opentelemetry-sdk>=1.24.0
+opentelemetry-exporter-otlp-proto-http>=1.24.0
+

@@ -125,7 +125,7 @@ def test_escalation_stops_at_cap_no_infinite_loop() -> None:
     assert len(res.escalations) == 2  # capped
     # Exactly three models tried (initial + 2 escalations), never more.
     assert r._client.calls == [
-        "gemini-3.1-flash-lite", "gemini-3-flash", "gemini-3.5-flash",
+        "gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-3.5-flash",
     ]
 
 

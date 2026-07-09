@@ -3,7 +3,27 @@
     "allow": [
       "Bash(.venv/Scripts/python.exe examples/demo_fallback.py)",
       "Bash(.venv/Scripts/python.exe -m pip install \"fastapi==0.116.1\" \"uvicorn==0.35.0\" \"streamlit==1.47.1\")",
-      "Bash(rm -f metrics_store.json /tmp/st.log; echo \"cleaned\")"
+      "Bash(rm -f metrics_store.json /tmp/st.log; echo \"cleaned\")",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"===== SEMCACHE TREE =====\"; ls -la \"C:/Users/Yash2.Garg/self_projects/semantic_cache\" 2>&1 | head -40 *)",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache/**)",
+      "Read(//c/Users/Yash2.Garg/self_projects/meridian/**)",
+      "Bash(ls -la \"/c/Users/Yash2.Garg/self_projects/semantic_cache/\" 2>/dev/null | head -30)",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache//**)",
+      "Bash(find \"C:\\\\Users\\\\Yash2.Garg\\\\self_projects\\\\meridian\" -type f -name \"*.py\" | head -20)",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache/semcache/**)",
+      "Bash(.venv/Scripts/python.exe -m pip install \"langchain-google-genai==2.1.8\")",
+      "Read(//c/Users/Yash2.Garg/self_projects/meridian/meridian-sdk/meridian/**)",
+      "Bash(ls -la \"/c/Users/Yash2.Garg/self_projects/semantic_cache/semcache/\")",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache/semcache//**)",
+      "Bash(ls \"C:\\\\Users\\\\Yash2.Garg\\\\self_projects\\\\meridian\\\\meridian-sdk\\\\meridian\")",
+      "Read(//c/Users/Yash2.Garg/self_projects/meridian/meridian-sdk/**)",
+      "Read(//c/Users/Yash2.Garg/self_projects/meridian/meridian-sdk/tests/**)",
+      "Bash(ls -la \"/c/Users/Yash2.Garg/self_projects/semantic_cache/examples/\")",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache/examples//**)",
+      "Read(//c/Users/Yash2.Garg/self_projects/meridian/meridian-sdk/meridian/wrappers/**)",
+      "Read(//c/Users/Yash2.Gark/self_projects/meridian/meridian-sdk/meridian/**)",
+      "Read(//c/Users/Yash2.Garg/self_projects/semantic_cache/examples/**)"
     ],
     "additionalDirectories": [
       "\\tmp"
